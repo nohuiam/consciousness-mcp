@@ -46,15 +46,15 @@ export class Tumbler {
    * Process a signal through the tumbler
    */
   process(signal: Signal): TumblerResult {
-    const typeHex = `0x${signal.type.toString(16).padStart(2, '0')}`;
-    const signalName = getSignalName(signal.type);
+    const typeHex = `0x${signal.signalType.toString(16).padStart(2, '0')}`;
+    const signalName = getSignalName(signal.signalType);
 
     // Track by type
     this.stats.byType[signalName] = (this.stats.byType[signalName] || 0) + 1;
 
     // For consciousness server, we accept ALL signals by default
     // since our job is to observe everything
-    if (this.acceptedSignals.size === 0 || this.acceptedSignals.has(signal.type)) {
+    if (this.acceptedSignals.size === 0 || this.acceptedSignals.has(signal.signalType)) {
       this.stats.accepted++;
       return {
         accepted: true,

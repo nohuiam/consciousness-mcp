@@ -92,32 +92,33 @@ export class InterlockSocket extends EventEmitter {
    * Handle incoming messages
    */
   private handleMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
-    try {
-      const signal = BaNanoProtocol.decode(msg);
-      this.stats.received++;
+    const signal = BaNanoProtocol.decode(msg);
 
-      // Update peer status
-      this.updatePeerStatus(signal.sender, rinfo);
+    // Silently ignore invalid/incompatible signals from other servers
+    if (!signal) {
+      this.stats.dropped++;
+      return;
+    }
 
-      // Process through tumbler
-      const result = this.tumbler.process(signal);
+    this.stats.received++;
 
-      if (result.accepted) {
-        // Route to handlers
-        if (this.handlers) {
-          this.handlers.route(signal, rinfo).catch(err => {
-            console.error('[InterLock] Handler error:', err);
-          });
-        }
+    // Update peer status
+    this.updatePeerStatus(signal.payload.sender, rinfo);
 
-        // Emit for external listeners
-        this.emit('signal', signal, rinfo);
-      } else {
-        console.error(`[InterLock] Rejected: ${result.reason}`);
-        this.stats.dropped++;
+    // Process through tumbler
+    const result = this.tumbler.process(signal);
+
+    if (result.accepted) {
+      // Route to handlers
+      if (this.handlers) {
+        this.handlers.route(signal, rinfo).catch(err => {
+          console.error('[InterLock] Handler error:', err);
+        });
       }
-    } catch (err) {
-      console.error('[InterLock] Failed to decode message:', err);
+
+      // Emit for external listeners
+      this.emit('signal', signal, rinfo);
+    } else {
       this.stats.dropped++;
     }
   }
@@ -125,21 +126,21 @@ export class InterlockSocket extends EventEmitter {
   /**
    * Update peer status when we receive a message from them
    */
-  private updatePeerStatus(senderId: string, rinfo: dgram.RemoteInfo): void {
-    const peer = this.peers.get(senderId);
+  private updatePeerStatus(sender: string, rinfo: dgram.RemoteInfo): void {
+    const peer = this.peers.get(sender);
     if (peer) {
       peer.lastSeen = Date.now();
       peer.status = 'active';
     } else {
       // New peer discovered
-      this.peers.set(senderId, {
-        name: senderId,
+      this.peers.set(sender, {
+        name: sender,
         host: rinfo.address,
         port: rinfo.port,
         lastSeen: Date.now(),
         status: 'active'
       });
-      console.error(`[InterLock] New peer discovered: ${senderId}`);
+      console.error(`[InterLock] New peer discovered: ${sender}`);
     }
   }
 

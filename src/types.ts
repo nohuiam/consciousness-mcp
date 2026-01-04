@@ -198,11 +198,13 @@ export interface InterlockConfig {
 }
 
 export interface Signal {
-  type: number;
-  version: string;
-  sender: string;
-  data: Record<string, unknown>;
+  signalType: number;
+  version: number;
   timestamp: number;
+  payload: {
+    sender: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface Peer {

@@ -28,14 +28,14 @@ export class SignalHandlers {
    * Route an incoming signal to the appropriate handler
    */
   async route(signal: Signal, rinfo: RemoteInfo): Promise<void> {
-    const signalName = getSignalName(signal.type);
-    console.error(`[Handlers] Received ${signalName} from ${signal.sender} (${rinfo.address}:${rinfo.port})`);
+    const signalName = getSignalName(signal.signalType);
+    console.error(`[Handlers] Received ${signalName} from ${signal.payload.sender} (${rinfo.address}:${rinfo.port})`);
 
     // Always log the signal as an attention event
     this.logAttentionEvent(signal, rinfo);
 
     // Handle specific signal types
-    switch (signal.type) {
+    switch (signal.signalType) {
       case SignalTypes.HEARTBEAT:
         this.handleHeartbeat(signal, rinfo);
         break;
@@ -109,14 +109,15 @@ export class SignalHandlers {
   private logAttentionEvent(signal: Signal, rinfo: RemoteInfo): void {
     try {
       const db = getDatabase();
+      const { sender, ...data } = signal.payload;
       const event: AttentionEvent = {
-        timestamp: signal.timestamp || Date.now(),
-        server_name: signal.sender,
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: sender,
         event_type: 'signal',
-        target: getSignalName(signal.type),
+        target: getSignalName(signal.signalType),
         context: {
-          signal_type: signal.type,
-          data: signal.data,
+          signal_type: signal.signalType,
+          data,
           source_address: rinfo.address,
           source_port: rinfo.port
         }
@@ -131,11 +132,12 @@ export class SignalHandlers {
    * Handle heartbeat signals - track server activity
    */
   private handleHeartbeat(signal: Signal, rinfo: RemoteInfo): void {
+    const { sender, ...data } = signal.payload;
     // Heartbeats tell us a server is alive
     this.context.emit('server_heartbeat', {
-      server: signal.sender,
+      server: sender,
       timestamp: signal.timestamp,
-      data: signal.data
+      data
     });
   }
 
@@ -145,15 +147,15 @@ export class SignalHandlers {
   private handleDockRequest(signal: Signal, rinfo: RemoteInfo): void {
     // Consciousness always approves docking - we want to observe everyone
     const response: Signal = {
-      type: SignalTypes.DOCK_APPROVED,
-      version: '1.0',
-      sender: this.serverId,
-      data: {
+      signalType: SignalTypes.DOCK_APPROVED,
+      version: 0x0100,
+      timestamp: Math.floor(Date.now() / 1000),
+      payload: {
+        sender: this.serverId,
         approved: true,
         message: 'Welcome to the consciousness mesh',
         capabilities: ['awareness', 'pattern-detection', 'reflection']
-      },
-      timestamp: Date.now()
+      }
     };
     this.context.sendResponse(rinfo.address, rinfo.port, response);
   }
@@ -162,9 +164,9 @@ export class SignalHandlers {
    * Handle shutdown signals
    */
   private handleShutdown(signal: Signal, rinfo: RemoteInfo): void {
-    console.error(`[Handlers] Server ${signal.sender} is shutting down`);
+    console.error(`[Handlers] Server ${signal.payload.sender} is shutting down`);
     this.context.emit('server_shutdown', {
-      server: signal.sender,
+      server: signal.payload.sender,
       timestamp: signal.timestamp
     });
   }
@@ -174,19 +176,20 @@ export class SignalHandlers {
    */
   private handleFileEvent(signal: Signal, rinfo: RemoteInfo): void {
     const db = getDatabase();
+    const { sender, ...data } = signal.payload;
     const event: AttentionEvent = {
-      timestamp: signal.timestamp || Date.now(),
-      server_name: signal.sender,
+      timestamp: signal.timestamp * 1000 || Date.now(),
+      server_name: sender,
       event_type: 'file',
-      target: (signal.data.path || signal.data.file || 'unknown') as string,
-      context: signal.data
+      target: (data.path || data.file || 'unknown') as string,
+      context: data
     };
     db.insertAttentionEvent(event);
 
     this.context.emit('file_event', {
-      type: getSignalName(signal.type),
-      server: signal.sender,
-      data: signal.data
+      type: getSignalName(signal.signalType),
+      server: sender,
+      data
     });
   }
 
@@ -195,30 +198,31 @@ export class SignalHandlers {
    */
   private handleSearchEvent(signal: Signal, rinfo: RemoteInfo): void {
     const db = getDatabase();
+    const { sender, ...data } = signal.payload;
 
-    if (signal.type === SignalTypes.SEARCH_STARTED) {
+    if (signal.signalType === SignalTypes.SEARCH_STARTED) {
       const event: AttentionEvent = {
-        timestamp: signal.timestamp || Date.now(),
-        server_name: signal.sender,
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: sender,
         event_type: 'query',
-        target: (signal.data.query || signal.data.search_term || 'unknown') as string,
-        context: signal.data
+        target: (data.query || data.search_term || 'unknown') as string,
+        context: data
       };
       db.insertAttentionEvent(event);
     }
 
-    if (signal.type === SignalTypes.SEARCH_COMPLETED) {
+    if (signal.signalType === SignalTypes.SEARCH_COMPLETED) {
       // Log as operation completion
       const op: Operation = {
-        timestamp: signal.timestamp || Date.now(),
-        server_name: signal.sender,
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: sender,
         operation_type: 'search',
-        operation_id: (signal.data.search_id || `search-${Date.now()}`) as string,
-        input_summary: (signal.data.query || 'unknown') as string,
-        outcome: (signal.data.results_count as number) > 0 ? 'success' : 'partial',
-        quality_score: Math.min(1, (signal.data.results_count as number || 0) / 10),
-        lessons: { results_count: signal.data.results_count },
-        duration_ms: signal.data.duration_ms as number
+        operation_id: (data.search_id || `search-${Date.now()}`) as string,
+        input_summary: (data.query || 'unknown') as string,
+        outcome: (data.results_count as number) > 0 ? 'success' : 'partial',
+        quality_score: Math.min(1, (data.results_count as number || 0) / 10),
+        lessons: { results_count: data.results_count },
+        duration_ms: data.duration_ms as number
       };
       try {
         db.insertOperation(op);
@@ -228,9 +232,9 @@ export class SignalHandlers {
     }
 
     this.context.emit('search_event', {
-      type: getSignalName(signal.type),
-      server: signal.sender,
-      data: signal.data
+      type: getSignalName(signal.signalType),
+      server: sender,
+      data
     });
   }
 
@@ -239,31 +243,32 @@ export class SignalHandlers {
    */
   private handleBuildEvent(signal: Signal, rinfo: RemoteInfo): void {
     const db = getDatabase();
-    const buildId = (signal.data.build_id || signal.data.server_name || `build-${Date.now()}`) as string;
+    const { sender, ...data } = signal.payload;
+    const buildId = (data.build_id || data.server_name || `build-${Date.now()}`) as string;
 
-    if (signal.type === SignalTypes.BUILD_STARTED) {
+    if (signal.signalType === SignalTypes.BUILD_STARTED) {
       const event: AttentionEvent = {
-        timestamp: signal.timestamp || Date.now(),
-        server_name: signal.sender,
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: sender,
         event_type: 'operation',
         target: buildId,
-        context: { operation: 'build_started', ...signal.data }
+        context: { operation: 'build_started', ...data }
       };
       db.insertAttentionEvent(event);
     }
 
-    if (signal.type === SignalTypes.BUILD_COMPLETED || signal.type === SignalTypes.BUILD_FAILED) {
-      const outcome: OperationOutcome = signal.type === SignalTypes.BUILD_COMPLETED ? 'success' : 'failure';
+    if (signal.signalType === SignalTypes.BUILD_COMPLETED || signal.signalType === SignalTypes.BUILD_FAILED) {
+      const outcome: OperationOutcome = signal.signalType === SignalTypes.BUILD_COMPLETED ? 'success' : 'failure';
       const op: Operation = {
-        timestamp: signal.timestamp || Date.now(),
-        server_name: signal.sender,
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: sender,
         operation_type: 'build',
         operation_id: buildId,
-        input_summary: (signal.data.server_name || signal.data.description || 'unknown') as string,
+        input_summary: (data.server_name || data.description || 'unknown') as string,
         outcome,
         quality_score: outcome === 'success' ? 0.9 : 0.2,
-        lessons: signal.data as Record<string, unknown>,
-        duration_ms: signal.data.duration_ms as number
+        lessons: data as Record<string, unknown>,
+        duration_ms: data.duration_ms as number
       };
       try {
         db.insertOperation(op);
@@ -275,16 +280,16 @@ export class SignalHandlers {
       if (outcome === 'failure') {
         this.context.emit('lesson_learned', {
           type: 'build_failure',
-          server: signal.sender,
-          data: signal.data
+          server: sender,
+          data
         });
       }
     }
 
     this.context.emit('build_event', {
-      type: getSignalName(signal.type),
-      server: signal.sender,
-      data: signal.data
+      type: getSignalName(signal.signalType),
+      server: sender,
+      data
     });
   }
 
@@ -293,28 +298,29 @@ export class SignalHandlers {
    */
   private handleVerificationEvent(signal: Signal, rinfo: RemoteInfo): void {
     const db = getDatabase();
+    const { sender, ...data } = signal.payload;
 
-    if (signal.type === SignalTypes.VERIFICATION_RESULT) {
-      const verifyId = (signal.data.verification_id || `verify-${Date.now()}`) as string;
-      const verdict = signal.data.verdict as string;
+    if (signal.signalType === SignalTypes.VERIFICATION_RESULT) {
+      const verifyId = (data.verification_id || `verify-${Date.now()}`) as string;
+      const verdict = data.verdict as string;
       const outcome: OperationOutcome =
         verdict === 'SUPPORTED' ? 'success' :
         verdict === 'CONTRADICTED' ? 'failure' : 'partial';
 
       const op: Operation = {
-        timestamp: signal.timestamp || Date.now(),
-        server_name: signal.sender,
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: sender,
         operation_type: 'verify',
         operation_id: verifyId,
-        input_summary: (signal.data.claim || 'unknown') as string,
+        input_summary: (data.claim || 'unknown') as string,
         outcome,
-        quality_score: (signal.data.confidence || 0.5) as number,
+        quality_score: (data.confidence || 0.5) as number,
         lessons: {
           verdict,
-          constraints: signal.data.constraints,
-          sources: signal.data.sources
+          constraints: data.constraints,
+          sources: data.sources
         },
-        duration_ms: signal.data.duration_ms as number
+        duration_ms: data.duration_ms as number
       };
       try {
         db.insertOperation(op);
@@ -324,9 +330,9 @@ export class SignalHandlers {
     }
 
     this.context.emit('verification_event', {
-      type: getSignalName(signal.type),
-      server: signal.sender,
-      data: signal.data
+      type: getSignalName(signal.signalType),
+      server: sender,
+      data
     });
   }
 
@@ -334,22 +340,23 @@ export class SignalHandlers {
    * Handle validation events from Context Guardian
    */
   private handleValidationEvent(signal: Signal, rinfo: RemoteInfo): void {
-    const outcome = signal.type === SignalTypes.VALIDATION_APPROVED ? 'success' : 'failure';
+    const { sender, ...data } = signal.payload;
+    const outcome = signal.signalType === SignalTypes.VALIDATION_APPROVED ? 'success' : 'failure';
 
     this.context.emit('validation_event', {
-      type: getSignalName(signal.type),
+      type: getSignalName(signal.signalType),
       outcome,
-      server: signal.sender,
-      data: signal.data
+      server: sender,
+      data
     });
 
     // Track validation failures for pattern detection
     if (outcome === 'failure') {
       this.context.emit('pattern_candidate', {
         type: 'validation_failure',
-        server: signal.sender,
-        reason: signal.data.reason,
-        data: signal.data
+        server: sender,
+        reason: data.reason,
+        data
       });
     }
   }
@@ -359,19 +366,20 @@ export class SignalHandlers {
    */
   private handleCoordinationEvent(signal: Signal, rinfo: RemoteInfo): void {
     const db = getDatabase();
+    const { sender, ...data } = signal.payload;
     const event: AttentionEvent = {
-      timestamp: signal.timestamp || Date.now(),
-      server_name: signal.sender,
+      timestamp: signal.timestamp * 1000 || Date.now(),
+      server_name: sender,
       event_type: 'workflow',
-      target: getSignalName(signal.type),
-      context: signal.data
+      target: getSignalName(signal.signalType),
+      context: data
     };
     db.insertAttentionEvent(event);
 
     this.context.emit('coordination_event', {
-      type: getSignalName(signal.type),
-      server: signal.sender,
-      data: signal.data
+      type: getSignalName(signal.signalType),
+      server: sender,
+      data
     });
   }
 
@@ -379,19 +387,20 @@ export class SignalHandlers {
    * Handle error signals
    */
   private handleError(signal: Signal, rinfo: RemoteInfo): void {
-    console.error(`[Handlers] Error from ${signal.sender}:`, signal.data);
+    const { sender, ...data } = signal.payload;
+    console.error(`[Handlers] Error from ${sender}:`, data);
 
     this.context.emit('error_received', {
-      server: signal.sender,
-      error: signal.data,
+      server: sender,
+      error: data,
       timestamp: signal.timestamp
     });
 
     // Track for pattern detection
     this.context.emit('pattern_candidate', {
       type: 'error',
-      server: signal.sender,
-      data: signal.data
+      server: sender,
+      data
     });
   }
 
@@ -399,12 +408,13 @@ export class SignalHandlers {
    * Handle unknown signals - still log them for analysis
    */
   private handleUnknownSignal(signal: Signal, rinfo: RemoteInfo): void {
-    console.error(`[Handlers] Unknown signal type 0x${signal.type.toString(16)} from ${signal.sender}`);
+    const { sender, ...data } = signal.payload;
+    console.error(`[Handlers] Unknown signal type 0x${signal.signalType.toString(16)} from ${sender}`);
 
     this.context.emit('unknown_signal', {
-      type: signal.type,
-      server: signal.sender,
-      data: signal.data
+      type: signal.signalType,
+      server: sender,
+      data
     });
   }
 }
