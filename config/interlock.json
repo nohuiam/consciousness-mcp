@@ -1,0 +1,67 @@
+{
+  "server_id": "consciousness-mcp",
+  "ports": {
+    "udp": 3028,
+    "http": 8028,
+    "websocket": 9028
+  },
+  "heartbeat": {
+    "interval": 30000,
+    "timeout": 90000
+  },
+  "signals": {
+    "accepted": [
+      "0x01", "0x02", "0x04", "0x05",
+      "0x10", "0x11", "0x12", "0x13",
+      "0x20", "0x21", "0x22",
+      "0x30", "0x31", "0x32", "0x33",
+      "0x40", "0x41", "0x42",
+      "0x50", "0x51", "0x52",
+      "0x60", "0x61", "0x62", "0x63",
+      "0x70", "0x71", "0x72",
+      "0x80", "0x81", "0x82",
+      "0x90", "0x91", "0x92",
+      "0xA0", "0xA1", "0xA2",
+      "0xB0", "0xB1", "0xB2",
+      "0xC0", "0xC1", "0xC2",
+      "0xD0", "0xD1", "0xD2",
+      "0xE0", "0xE1", "0xE2",
+      "0xF0", "0xFF"
+    ],
+    "emits": [
+      "AWARENESS_UPDATE",
+      "PATTERN_DETECTED",
+      "BLIND_SPOT_ALERT",
+      "REASONING_CONCERN",
+      "ATTENTION_SHIFT",
+      "LESSON_LEARNED"
+    ]
+  },
+  "peers": [
+    { "name": "context-guardian", "host": "localhost", "port": 3001 },
+    { "name": "quartermaster", "host": "localhost", "port": 3002 },
+    { "name": "snapshot", "host": "localhost", "port": 3003 },
+    { "name": "toolee", "host": "localhost", "port": 3004 },
+    { "name": "catasorter", "host": "localhost", "port": 3005 },
+    { "name": "smart-file-organizer", "host": "localhost", "port": 3007 },
+    { "name": "bonzai-bloat-buster", "host": "localhost", "port": 3008 },
+    { "name": "enterspect", "host": "localhost", "port": 3009 },
+    { "name": "neurogenesis-engine", "host": "localhost", "port": 3010 },
+    { "name": "trinity-coordinator", "host": "localhost", "port": 3012 },
+    { "name": "project-context", "host": "localhost", "port": 3016 },
+    { "name": "knowledge-curator", "host": "localhost", "port": 3017 },
+    { "name": "pk-manager", "host": "localhost", "port": 3018 },
+    { "name": "intelligent-router", "host": "localhost", "port": 3020 },
+    { "name": "verifier-mcp", "host": "localhost", "port": 3021 },
+    { "name": "safe-batch-processor", "host": "localhost", "port": 3022 },
+    { "name": "intake-guardian", "host": "localhost", "port": 3023 },
+    { "name": "health-monitor", "host": "localhost", "port": 3024 },
+    { "name": "synapse-relay", "host": "localhost", "port": 3025 },
+    { "name": "filesystem-guardian", "host": "localhost", "port": 3026 },
+    { "name": "tenets-server", "host": "localhost", "port": 3027 },
+    { "name": "consolidation-engine", "host": "localhost", "port": 3032 }
+  ],
+  "database": {
+    "path": "./data/consciousness.db"
+  }
+}
