@@ -142,23 +142,41 @@ export function encode(signalType: number, sender: string, data?: Record<string,
 }
 
 /**
- * Decode a BaNano binary buffer to Signal
- * Returns null if buffer is invalid
+ * Map string signal type to numeric code
  */
-export function decode(buffer: Buffer): Signal | null {
-  // Minimum 12-byte header required
-  if (!buffer || buffer.length < 12) {
-    return null;
-  }
+function mapStringToSignalType(typeStr: string): number {
+  const mapping: Record<string, number> = {
+    // Core signals
+    'HEARTBEAT': 0x04,
+    'DOCK_REQUEST': 0x01,
+    'DOCK_APPROVED': 0x02,
+    'DOCK_REJECTED': 0x03,
+    'UNDOCK': 0x05,
+    'SHUTDOWN': 0xFF,
+    'ERROR': 0xF0,
+    // File signals
+    'FILE_DISCOVERED': 0x10,
+    'FILE_INDEXED': 0x11,
+    // Add more as needed
+  };
+  return mapping[typeStr.toUpperCase()] || 0x00;
+}
 
+/**
+ * Decode binary BaNano format (12-byte header + JSON)
+ */
+function decodeBinary(buffer: Buffer): Signal | null {
   try {
     const signalType = buffer.readUInt16BE(0);
     const version = buffer.readUInt16BE(2);
     const payloadLength = buffer.readUInt32BE(4);
     const timestamp = buffer.readUInt32BE(8);
 
-    // Validate payload length
-    if (buffer.length < 12 + payloadLength) {
+    // Validate: signal type should be in valid range and payload length reasonable
+    if (signalType === 0 || signalType > 0xFF) {
+      return null;
+    }
+    if (payloadLength > buffer.length - 12) {
       return null;
     }
 
@@ -166,9 +184,9 @@ export function decode(buffer: Buffer): Signal | null {
     const payloadStr = buffer.slice(12, 12 + payloadLength).toString('utf8');
     const payload = JSON.parse(payloadStr);
 
-    // Ensure payload has sender
+    // Ensure payload has sender (servers may send serverId instead)
     if (!payload.sender) {
-      payload.sender = 'unknown';
+      payload.sender = payload.serverId || payload.source || 'unknown';
     }
 
     return {
@@ -180,6 +198,77 @@ export function decode(buffer: Buffer): Signal | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Decode text-based formats:
+ * - Format A: {t, s, d, ts} (consolidation-engine, intake-guardian, safe-batch-processor)
+ * - Format B: {type, source, payload, timestamp, nonce} (filesystem-guardian)
+ */
+function decodeText(buffer: Buffer): Signal | null {
+  try {
+    const str = buffer.toString('utf-8');
+
+    // Must start with { to be JSON
+    if (!str.startsWith('{')) {
+      return null;
+    }
+
+    const json = JSON.parse(str);
+
+    // Format A: {t, s, d, ts}
+    if ('t' in json && 's' in json) {
+      return {
+        signalType: typeof json.t === 'number' ? json.t : mapStringToSignalType(String(json.t)),
+        version: PROTOCOL_VERSION,
+        timestamp: Math.floor((json.ts || Date.now()) / 1000),
+        payload: {
+          sender: json.s,
+          ...(typeof json.d === 'object' && json.d !== null ? json.d : { data: json.d })
+        }
+      };
+    }
+
+    // Format B: {type, source, payload, timestamp, nonce}
+    if ('type' in json && 'source' in json) {
+      return {
+        signalType: typeof json.type === 'number' ? json.type : mapStringToSignalType(String(json.type)),
+        version: PROTOCOL_VERSION,
+        timestamp: Math.floor((json.timestamp || Date.now()) / 1000),
+        payload: {
+          sender: json.source,
+          ...(typeof json.payload === 'object' && json.payload !== null ? json.payload : {})
+        }
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode a buffer to Signal - supports multiple formats
+ * Tries binary format first, falls back to text formats
+ * Returns null if buffer is invalid
+ */
+export function decode(buffer: Buffer): Signal | null {
+  if (!buffer || buffer.length < 2) {
+    return null;
+  }
+
+  // Try binary format first (12-byte header)
+  if (buffer.length >= 12) {
+    const binaryResult = decodeBinary(buffer);
+    if (binaryResult) return binaryResult;
+  }
+
+  // Fall back to text formats
+  const textResult = decodeText(buffer);
+  if (textResult) return textResult;
+
+  return null;
 }
 
 /**
