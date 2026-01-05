@@ -41,7 +41,7 @@
     { "name": "context-guardian", "host": "localhost", "port": 3001 },
     { "name": "quartermaster", "host": "localhost", "port": 3002 },
     { "name": "snapshot", "host": "localhost", "port": 3003 },
-    { "name": "toolee", "host": "localhost", "port": 3004 },
+    { "name": "tool-registry", "host": "localhost", "port": 3004 },
     { "name": "catasorter", "host": "localhost", "port": 3005 },
     { "name": "smart-file-organizer", "host": "localhost", "port": 3007 },
     { "name": "bonzai-bloat-buster", "host": "localhost", "port": 3008 },
