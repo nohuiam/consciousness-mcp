@@ -167,6 +167,36 @@ function broadcastToolResult(toolName: string, result: unknown): void {
 }
 
 /**
+ * Run periodic cleanup to prevent unbounded data growth
+ */
+function startCleanupScheduler(): void {
+  const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // Daily
+  const RETENTION_DAYS = 30;
+
+  // Run cleanup immediately on startup (after a short delay)
+  setTimeout(() => {
+    try {
+      const db = getDatabase();
+      db.cleanupOldData(RETENTION_DAYS);
+      console.error(`[${SERVER_NAME}] Initial cleanup completed`);
+    } catch (error) {
+      console.error(`[${SERVER_NAME}] Initial cleanup error:`, error);
+    }
+  }, 60 * 1000); // 1 minute after startup
+
+  // Schedule daily cleanup
+  setInterval(() => {
+    try {
+      const db = getDatabase();
+      db.cleanupOldData(RETENTION_DAYS);
+      console.error(`[${SERVER_NAME}] Daily cleanup completed`);
+    } catch (error) {
+      console.error(`[${SERVER_NAME}] Cleanup error:`, error);
+    }
+  }, CLEANUP_INTERVAL);
+}
+
+/**
  * Take periodic awareness snapshots
  */
 function startSnapshotScheduler(): void {
@@ -250,8 +280,9 @@ async function main(): Promise<void> {
     console.error(`[${SERVER_NAME}] Initializing InterLock mesh on port ${config.ports.udp}...`);
     await initInterLock(config);
 
-    // Start snapshot scheduler
+    // Start scheduled jobs
     startSnapshotScheduler();
+    startCleanupScheduler();
 
     // Create and run MCP server
     const server = createServer();

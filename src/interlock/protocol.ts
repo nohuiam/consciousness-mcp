@@ -299,13 +299,28 @@ export function createSignal(
 
 // Legacy class wrapper for backwards compatibility during transition
 export class BaNanoProtocol {
+  static readonly HEADER_SIZE = 12;
+  static readonly VERSION_MAJOR = 1;
+  static readonly VERSION_MINOR = 0;
+
   static encode(signal: Signal): Buffer {
     const { sender, ...data } = signal.payload;
     return encode(signal.signalType, sender, data);
   }
 
-  static decode(buffer: Buffer): Signal | null {
-    return decode(buffer);
+  static decode(buffer: Buffer): Signal {
+    if (!buffer || buffer.length < BaNanoProtocol.HEADER_SIZE) {
+      throw new Error('Buffer too small for BaNano header');
+    }
+    const payloadLength = buffer.readUInt32BE(4);
+    if (buffer.length < BaNanoProtocol.HEADER_SIZE + payloadLength) {
+      throw new Error('Incomplete payload');
+    }
+    const result = decode(buffer);
+    if (!result) {
+      throw new Error('Invalid signal format');
+    }
+    return result;
   }
 
   static createSignal(signalType: number, sender: string, data?: Record<string, unknown>): Signal {

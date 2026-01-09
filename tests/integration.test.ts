@@ -262,10 +262,10 @@ describe('Integration Tests', () => {
         // Track as attention event
         db.insertAttentionEvent({
           timestamp: Date.now(),
-          server_name: signal.sender,
+          server_name: signal.payload.sender,
           event_type: 'signal',
           target: result.signalName,
-          context: signal.data
+          context: signal.payload as Record<string, unknown>
         });
       }
 

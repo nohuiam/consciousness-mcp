@@ -22,28 +22,27 @@ describe('BaNanoProtocol', () => {
   describe('encode', () => {
     it('should encode signal with correct header', () => {
       const signal: Signal = {
-        type: SignalTypes.HEARTBEAT,
-        version: '1.0',
-        sender: 'test-server',
-        data: { status: 'active' },
-        timestamp: Date.now()
+        signalType: SignalTypes.HEARTBEAT,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test-server', status: 'active' }
       };
 
       const buffer = BaNanoProtocol.encode(signal);
 
       expect(buffer.length).toBeGreaterThan(BaNanoProtocol.HEADER_SIZE);
-      expect(buffer.readUInt8(0)).toBe(SignalTypes.HEARTBEAT);
-      expect(buffer.readUInt8(1)).toBe(1); // Major version
-      expect(buffer.readUInt8(2)).toBe(0); // Minor version
+      // Signal type is uint16 big-endian, HEARTBEAT is 0x04
+      expect(buffer.readUInt16BE(0)).toBe(SignalTypes.HEARTBEAT);
+      // Version is uint16 big-endian, 0x0100 = major 1, minor 0
+      expect(buffer.readUInt16BE(2)).toBe(0x0100);
     });
 
     it('should encode payload length correctly', () => {
       const signal: Signal = {
-        type: SignalTypes.BUILD_STARTED,
-        version: '1.0',
-        sender: 'neurogenesis',
-        data: { project: 'test-project' },
-        timestamp: Date.now()
+        signalType: SignalTypes.BUILD_STARTED,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'neurogenesis', project: 'test-project' }
       };
 
       const buffer = BaNanoProtocol.encode(signal);
@@ -53,38 +52,37 @@ describe('BaNanoProtocol', () => {
       expect(payloadLength).toBe(actualPayload.length);
     });
 
-    it('should encode empty data correctly', () => {
+    it('should encode minimal payload correctly', () => {
       const signal: Signal = {
-        type: SignalTypes.HEARTBEAT,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.HEARTBEAT,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       const buffer = BaNanoProtocol.encode(signal);
       const payloadLength = buffer.readUInt32BE(4);
 
-      expect(payloadLength).toBe(2); // "{}"
+      // {"sender":"test"} = 17 bytes
+      expect(payloadLength).toBe(17);
     });
   });
 
   describe('decode', () => {
     it('should decode encoded signal correctly', () => {
       const original: Signal = {
-        type: SignalTypes.FILE_DISCOVERED,
-        version: '1.0',
-        sender: 'enterspect',
-        data: { path: '/test/file.ts', sender: 'enterspect' },
-        timestamp: Date.now()
+        signalType: SignalTypes.FILE_DISCOVERED,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'enterspect', path: '/test/file.ts' }
       };
 
       const buffer = BaNanoProtocol.encode(original);
       const decoded = BaNanoProtocol.decode(buffer);
 
-      expect(decoded.type).toBe(original.type);
-      expect(decoded.data.path).toBe('/test/file.ts');
-      expect(decoded.sender).toBe('enterspect');
+      expect(decoded.signalType).toBe(original.signalType);
+      expect(decoded.payload.path).toBe('/test/file.ts');
+      expect(decoded.payload.sender).toBe('enterspect');
     });
 
     it('should throw on buffer too small', () => {
@@ -94,23 +92,25 @@ describe('BaNanoProtocol', () => {
 
     it('should throw on incomplete payload', () => {
       const header = Buffer.alloc(BaNanoProtocol.HEADER_SIZE);
-      header.writeUInt8(SignalTypes.HEARTBEAT, 0);
+      header.writeUInt16BE(SignalTypes.HEARTBEAT, 0);
       header.writeUInt32BE(100, 4); // Claim 100 bytes of payload
 
       expect(() => BaNanoProtocol.decode(header)).toThrow('Incomplete payload');
     });
 
     it('should handle empty payload gracefully', () => {
+      // Create a valid header with empty JSON payload "{}"
+      const emptyPayload = Buffer.from('{}', 'utf8');
       const header = Buffer.alloc(BaNanoProtocol.HEADER_SIZE);
-      header.writeUInt8(SignalTypes.HEARTBEAT, 0);
-      header.writeUInt8(1, 1); // Major version
-      header.writeUInt8(0, 2); // Minor version
-      header.writeUInt32BE(0, 4); // No payload
+      header.writeUInt16BE(SignalTypes.HEARTBEAT, 0);
+      header.writeUInt16BE(0x0100, 2); // Version
+      header.writeUInt32BE(emptyPayload.length, 4); // Payload length
       header.writeUInt32BE(Math.floor(Date.now() / 1000), 8);
 
-      const decoded = BaNanoProtocol.decode(header);
-      expect(decoded.type).toBe(SignalTypes.HEARTBEAT);
-      expect(decoded.data).toEqual({});
+      const buffer = Buffer.concat([header, emptyPayload]);
+      const decoded = BaNanoProtocol.decode(buffer);
+      expect(decoded.signalType).toBe(SignalTypes.HEARTBEAT);
+      expect(decoded.payload.sender).toBe('unknown'); // Empty payload defaults sender
     });
   });
 
@@ -122,41 +122,41 @@ describe('BaNanoProtocol', () => {
         { active_servers: ['a', 'b'] }
       );
 
-      expect(signal.type).toBe(SignalTypes.AWARENESS_UPDATE);
-      expect(signal.sender).toBe('consciousness-mcp');
-      expect(signal.version).toBe('1.0');
-      expect(signal.data.active_servers).toEqual(['a', 'b']);
+      expect(signal.signalType).toBe(SignalTypes.AWARENESS_UPDATE);
+      expect(signal.payload.sender).toBe('consciousness-mcp');
+      expect(signal.version).toBe(0x0100);
+      expect(signal.payload.active_servers).toEqual(['a', 'b']);
       expect(signal.timestamp).toBeDefined();
     });
 
-    it('should include sender in data', () => {
+    it('should include sender in payload', () => {
       const signal = BaNanoProtocol.createSignal(
         SignalTypes.PATTERN_DETECTED,
         'consciousness-mcp',
         { pattern: 'test' }
       );
 
-      expect(signal.data.sender).toBe('consciousness-mcp');
+      expect(signal.payload.sender).toBe('consciousness-mcp');
     });
   });
 
   describe('roundtrip encoding', () => {
     it('should preserve data through encode/decode cycle', () => {
       const testCases = [
-        { type: SignalTypes.BUILD_COMPLETED, data: { success: true, duration: 5000 } },
-        { type: SignalTypes.VALIDATION_APPROVED, data: { validator: 'context-guardian' } },
-        { type: SignalTypes.PATTERN_DETECTED, data: { pattern_type: 'failure', confidence: 0.85 } },
-        { type: SignalTypes.ERROR, data: { message: 'Test error', code: 500 } }
+        { signalType: SignalTypes.BUILD_COMPLETED, data: { success: true, duration: 5000 } },
+        { signalType: SignalTypes.VALIDATION_APPROVED, data: { validator: 'context-guardian' } },
+        { signalType: SignalTypes.PATTERN_DETECTED, data: { pattern_type: 'failure', confidence: 0.85 } },
+        { signalType: SignalTypes.ERROR, data: { message: 'Test error', code: 500 } }
       ];
 
       for (const tc of testCases) {
-        const signal = BaNanoProtocol.createSignal(tc.type, 'test', tc.data);
+        const signal = BaNanoProtocol.createSignal(tc.signalType, 'test', tc.data);
         const encoded = BaNanoProtocol.encode(signal);
         const decoded = BaNanoProtocol.decode(encoded);
 
-        expect(decoded.type).toBe(tc.type);
+        expect(decoded.signalType).toBe(tc.signalType);
         for (const [key, value] of Object.entries(tc.data)) {
-          expect(decoded.data[key]).toEqual(value);
+          expect(decoded.payload[key]).toEqual(value);
         }
       }
     });
@@ -196,7 +196,7 @@ describe('getSignalName', () => {
   });
 
   it('should return unknown format for unrecognized signals', () => {
-    expect(getSignalName(0xFE)).toBe('UNKNOWN_0xfe');
+    expect(getSignalName(0xFE)).toBe('UNKNOWN_0xFE');
   });
 });
 
@@ -220,11 +220,10 @@ describe('Tumbler', () => {
       const tumbler = new Tumbler([]);
 
       const signal: Signal = {
-        type: SignalTypes.HEARTBEAT,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.HEARTBEAT,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       const result = tumbler.process(signal);
@@ -236,11 +235,10 @@ describe('Tumbler', () => {
       const tumbler = new Tumbler(['0x04']); // Only HEARTBEAT
 
       const heartbeat: Signal = {
-        type: SignalTypes.HEARTBEAT,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.HEARTBEAT,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       const result = tumbler.process(heartbeat);
@@ -251,11 +249,10 @@ describe('Tumbler', () => {
       const tumbler = new Tumbler(['0x04']); // Only HEARTBEAT
 
       const buildSignal: Signal = {
-        type: SignalTypes.BUILD_STARTED,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.BUILD_STARTED,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       const result = tumbler.process(buildSignal);
@@ -309,11 +306,10 @@ describe('Tumbler', () => {
 
     it('should track accepted signals', () => {
       const signal: Signal = {
-        type: SignalTypes.HEARTBEAT,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.HEARTBEAT,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       tumbler.process(signal);
@@ -325,11 +321,10 @@ describe('Tumbler', () => {
 
     it('should track rejected signals', () => {
       const signal: Signal = {
-        type: SignalTypes.BUILD_STARTED,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.BUILD_STARTED,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       tumbler.process(signal);
@@ -340,9 +335,9 @@ describe('Tumbler', () => {
 
     it('should track by signal type', () => {
       const signals: Signal[] = [
-        { type: SignalTypes.HEARTBEAT, version: '1.0', sender: 'a', data: {}, timestamp: Date.now() },
-        { type: SignalTypes.HEARTBEAT, version: '1.0', sender: 'b', data: {}, timestamp: Date.now() },
-        { type: SignalTypes.BUILD_STARTED, version: '1.0', sender: 'c', data: {}, timestamp: Date.now() }
+        { signalType: SignalTypes.HEARTBEAT, version: 0x0100, timestamp: Math.floor(Date.now() / 1000), payload: { sender: 'a' } },
+        { signalType: SignalTypes.HEARTBEAT, version: 0x0100, timestamp: Math.floor(Date.now() / 1000), payload: { sender: 'b' } },
+        { signalType: SignalTypes.BUILD_STARTED, version: 0x0100, timestamp: Math.floor(Date.now() / 1000), payload: { sender: 'c' } }
       ];
 
       for (const sig of signals) {
@@ -356,11 +351,10 @@ describe('Tumbler', () => {
 
     it('should reset statistics', () => {
       const signal: Signal = {
-        type: SignalTypes.HEARTBEAT,
-        version: '1.0',
-        sender: 'test',
-        data: {},
-        timestamp: Date.now()
+        signalType: SignalTypes.HEARTBEAT,
+        version: 0x0100,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: { sender: 'test' }
       };
 
       tumbler.process(signal);

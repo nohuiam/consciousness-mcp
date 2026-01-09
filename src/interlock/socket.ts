@@ -26,12 +26,17 @@ export class InterlockSocket extends EventEmitter {
   private handlers: SignalHandlers | null = null;
   private peers: Map<string, Peer> = new Map();
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private recoveryTimer: NodeJS.Timeout | null = null;
   private startTime: number = Date.now();
   private stats = {
     sent: 0,
     received: 0,
     dropped: 0
   };
+  // Peer recovery tracking with exponential backoff
+  private peerRecoveryAttempts: Map<string, number> = new Map();
+  private static readonly MAX_RECOVERY_ATTEMPTS = 5;
+  private static readonly BASE_RECOVERY_INTERVAL = 10000; // 10 seconds
 
   constructor(config: InterlockConfig) {
     super();
@@ -79,6 +84,9 @@ export class InterlockSocket extends EventEmitter {
 
         // Start heartbeat
         this.startHeartbeat();
+
+        // Start peer recovery mechanism
+        this.startRecoveryChecker();
 
         // Announce ourselves to peers
         this.announceToPeers();
@@ -129,8 +137,15 @@ export class InterlockSocket extends EventEmitter {
   private updatePeerStatus(sender: string, rinfo: dgram.RemoteInfo): void {
     const peer = this.peers.get(sender);
     if (peer) {
+      const wasInactive = peer.status === 'inactive';
       peer.lastSeen = Date.now();
       peer.status = 'active';
+      // Reset recovery attempts on successful communication
+      this.peerRecoveryAttempts.delete(sender);
+      if (wasInactive) {
+        console.error(`[InterLock] Peer ${sender} recovered`);
+        this.emit('peer_recovered', { name: sender, peer });
+      }
     } else {
       // New peer discovered
       this.peers.set(sender, {
@@ -229,6 +244,61 @@ export class InterlockSocket extends EventEmitter {
           peer.status = 'inactive';
           console.error(`[InterLock] Peer ${name} is inactive`);
           this.emit('peer_inactive', { name, peer });
+        }
+      }
+    }
+  }
+
+  /**
+   * Start the peer recovery checker with exponential backoff
+   */
+  private startRecoveryChecker(): void {
+    // Check for inactive peers and attempt recovery every 30 seconds
+    this.recoveryTimer = setInterval(() => {
+      this.attemptPeerRecovery();
+    }, 30000);
+
+    console.error('[InterLock] Peer recovery mechanism started');
+  }
+
+  /**
+   * Attempt to recover inactive peers with exponential backoff
+   */
+  private attemptPeerRecovery(): void {
+    const now = Date.now();
+
+    for (const [name, peer] of this.peers) {
+      if (peer.status === 'inactive') {
+        const attempts = this.peerRecoveryAttempts.get(name) || 0;
+
+        // Skip if max recovery attempts exceeded
+        if (attempts >= InterlockSocket.MAX_RECOVERY_ATTEMPTS) {
+          continue;
+        }
+
+        // Calculate backoff: 10s, 20s, 40s, 80s, 160s (max)
+        const backoff = InterlockSocket.BASE_RECOVERY_INTERVAL * Math.pow(2, attempts);
+        const lastAttemptTime = (peer as any)._lastRecoveryAttempt || 0;
+
+        // Only attempt if enough time has passed since last attempt
+        if (now - lastAttemptTime >= backoff) {
+          console.error(`[InterLock] Attempting recovery for peer ${name} (attempt ${attempts + 1}/${InterlockSocket.MAX_RECOVERY_ATTEMPTS})`);
+
+          // Send a dock request to try to re-establish communication
+          const signal = BaNanoProtocol.createSignal(
+            SignalTypes.DOCK_REQUEST,
+            this.config.server_id,
+            {
+              server_type: 'consciousness-mcp',
+              capabilities: ['awareness', 'pattern-detection', 'reflection'],
+              listening_port: this.config.ports.udp,
+              recovery_attempt: true
+            }
+          );
+
+          this.send(peer.host, peer.port, signal);
+          this.peerRecoveryAttempts.set(name, attempts + 1);
+          (peer as any)._lastRecoveryAttempt = now;
         }
       }
     }
@@ -335,6 +405,12 @@ export class InterlockSocket extends EventEmitter {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+
+    // Stop recovery checker
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
     }
 
     // Send shutdown signal

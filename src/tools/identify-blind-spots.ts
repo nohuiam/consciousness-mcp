@@ -36,8 +36,8 @@ const TIME_RANGES: Record<string, number> = {
   '30d': 30 * 24 * 60 * 60 * 1000
 };
 
-// Known ecosystem servers - should match interlock config
-const ECOSYSTEM_SERVERS = [
+// Default ecosystem servers - fallback when InterLock unavailable
+const DEFAULT_ECOSYSTEM_SERVERS = [
   'context-guardian', 'quartermaster', 'snapshot', 'toolee', 'catasorter',
   'looker', 'smart-file-organizer', 'bonzai-bloat-buster', 'enterspect',
   'neurogenesis-engine', 'chronos-synapse', 'trinity-coordinator',
@@ -46,6 +46,19 @@ const ECOSYSTEM_SERVERS = [
   'intake-guardian', 'health-monitor', 'synapse-relay', 'filesystem-guardian',
   'consolidation-engine', 'consciousness-mcp'
 ];
+
+/**
+ * Get ecosystem servers dynamically from InterLock peers, with fallback
+ */
+function getEcosystemServers(interlock: ReturnType<typeof getInterLock>): string[] {
+  const peers = interlock?.getPeers() || [];
+  if (peers.length > 0) {
+    // Use dynamic peer list from InterLock
+    return peers.map(p => p.name);
+  }
+  // Fall back to default static list
+  return DEFAULT_ECOSYSTEM_SERVERS;
+}
 
 // Expected operation types for a healthy ecosystem
 const EXPECTED_OPERATION_TYPES: OperationType[] = [
@@ -110,12 +123,13 @@ export function handleIdentifyBlindSpots(args: unknown): BlindSpotResult {
     const operations = db.getOperations(since, 1000);
     const activeServers = new Set(operations.map(o => o.server_name));
 
-    // Check for peers from InterLock
+    // Get ecosystem servers dynamically from InterLock peers
+    const ecosystemServers = getEcosystemServers(interlock);
     const peers = interlock?.getPeers() || [];
     const peerNames = new Set(peers.map(p => p.name));
 
     // Find servers that exist but haven't been used
-    for (const server of ECOSYSTEM_SERVERS) {
+    for (const server of ecosystemServers) {
       if (!activeServers.has(server)) {
         const inPeers = peerNames.has(server);
         blindSpots.push({
@@ -141,7 +155,7 @@ export function handleIdentifyBlindSpots(args: unknown): BlindSpotResult {
       }
     }
 
-    coverage['servers'] = activeServers.size / ECOSYSTEM_SERVERS.length;
+    coverage['servers'] = activeServers.size / ecosystemServers.length;
   }
 
   // Analyze operation blind spots

@@ -6,10 +6,12 @@ export class WebSocketService {
   private clients: Set<WebSocket> = new Set();
   private port: number;
   private startTime: number = Date.now();
+  private readonly MAX_CLIENTS = 100; // Prevent unbounded client accumulation
   private stats = {
     connections: 0,
     messages_sent: 0,
-    messages_received: 0
+    messages_received: 0,
+    rejected_connections: 0
   };
 
   constructor(port: number) {
@@ -34,6 +36,14 @@ export class WebSocketService {
   }
 
   private handleConnection(ws: WebSocket): void {
+    // Enforce client limit to prevent unbounded growth
+    if (this.clients.size >= this.MAX_CLIENTS) {
+      console.error(`[WebSocket] Connection rejected: max clients (${this.MAX_CLIENTS}) reached`);
+      this.stats.rejected_connections++;
+      ws.close(1013, 'Server at capacity');
+      return;
+    }
+
     this.clients.add(ws);
     this.stats.connections++;
     console.error(`[WebSocket] Client connected (total: ${this.clients.size})`);

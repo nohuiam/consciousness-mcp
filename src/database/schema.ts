@@ -546,6 +546,8 @@ export class DatabaseManager {
     this.db.prepare('DELETE FROM operations WHERE timestamp < ?').run(cutoff);
     this.db.prepare('DELETE FROM awareness_snapshots WHERE timestamp < ?').run(cutoff);
     this.db.prepare('DELETE FROM reasoning_audits WHERE timestamp < ?').run(cutoff);
+    // Clean up stale patterns not seen recently (prevents unbounded growth)
+    this.db.prepare('DELETE FROM patterns WHERE last_seen < ?').run(cutoff);
 
     console.error(`[Database] Cleaned up data older than ${retentionDays} days`);
   }
