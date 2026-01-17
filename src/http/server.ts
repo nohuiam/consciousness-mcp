@@ -3,6 +3,7 @@ import { Server } from 'http';
 import { getDatabase } from '../database/schema.js';
 import { getInterLock } from '../interlock/index.js';
 import type { PatternType, OperationType } from '../types.js';
+import { ALL_TOOLS, TOOL_HANDLERS } from '../tools/index.js';
 
 export class HttpServer {
   private app: Application;
@@ -322,6 +323,35 @@ export class HttpServer {
         tumbler: interlock.getTumblerStats(),
         peers: interlock.getPeers()
       });
+    });
+
+    // Gateway integration: List all MCP tools
+    this.app.get('/api/tools', (req: Request, res: Response) => {
+      const toolList = ALL_TOOLS.map((t: { name: string; description: string; inputSchema: object }) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema
+      }));
+      res.json({ tools: toolList, count: toolList.length });
+    });
+
+    // Gateway integration: Execute MCP tool via HTTP
+    this.app.post('/api/tools/:toolName', async (req: Request, res: Response) => {
+      const { toolName } = req.params;
+      const args = req.body.arguments || req.body;
+
+      const handler = TOOL_HANDLERS[toolName];
+      if (!handler) {
+        res.status(404).json({ success: false, error: `Tool '${toolName}' not found` });
+        return;
+      }
+
+      try {
+        const result = await handler(args);
+        res.json({ success: true, result });
+      } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+      }
     });
   }
 
