@@ -4,6 +4,12 @@ import { getDatabase } from '../database/schema.js';
 import { getInterLock } from '../interlock/index.js';
 import type { PatternType, OperationType } from '../types.js';
 import { ALL_TOOLS, TOOL_HANDLERS } from '../tools/index.js';
+import {
+  rateLimitMiddleware,
+  requestIdMiddleware,
+  errorHandlerMiddleware,
+  notFoundHandler
+} from './middleware/index.js';
 
 export class HttpServer {
   private app: Application;
@@ -23,7 +29,7 @@ export class HttpServer {
     this.app.use((req: Request, res: Response, next: NextFunction) => {
       res.header('Access-Control-Allow-Origin', '*');
       res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-Request-ID');
       if (req.method === 'OPTIONS') {
         res.sendStatus(200);
         return;
@@ -34,9 +40,15 @@ export class HttpServer {
     // JSON parsing
     this.app.use(express.json());
 
-    // Request logging
+    // Request ID tracing (before rate limiting and logging)
+    this.app.use(requestIdMiddleware);
+
+    // Rate limiting (100 requests per minute per IP)
+    this.app.use(rateLimitMiddleware);
+
+    // Request logging with request ID
     this.app.use((req: Request, res: Response, next: NextFunction) => {
-      console.error(`[HTTP] ${req.method} ${req.path}`);
+      console.error(`[HTTP] [${req.requestId}] ${req.method} ${req.path}`);
       next();
     });
   }
@@ -353,6 +365,12 @@ export class HttpServer {
         res.status(500).json({ success: false, error: String(error) });
       }
     });
+
+    // 404 handler for unmatched routes (must be after all routes)
+    this.app.use(notFoundHandler);
+
+    // Error handler (must be last)
+    this.app.use(errorHandlerMiddleware);
   }
 
   async start(): Promise<void> {

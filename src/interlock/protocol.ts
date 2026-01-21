@@ -106,6 +106,10 @@ export const SignalTypes = {
   ATTENTION_SHIFT: 0xE4,
   LESSON_LEARNED: 0xE5,
 
+  // AstroSentry signals (received from HTTP→Cognitive bridge)
+  ASTROSENTRY_EVENT: 0xE6,
+  COGNITIVE_INSIGHT: 0xE7,  // Cognitive → AstroSentry
+
   // Error/System signals
   ERROR: 0xF0,
   SHUTDOWN: 0xFF

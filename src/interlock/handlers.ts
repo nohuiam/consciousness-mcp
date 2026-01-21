@@ -92,6 +92,11 @@ export class SignalHandlers {
         this.handleCoordinationEvent(signal, rinfo);
         break;
 
+      // AstroSentry events (from HTTP→Cognitive bridge)
+      case SignalTypes.ASTROSENTRY_EVENT:
+        this.handleAstrosentryEvent(signal, rinfo);
+        break;
+
       // Error events
       case SignalTypes.ERROR:
         this.handleError(signal, rinfo);
@@ -381,6 +386,80 @@ export class SignalHandlers {
       server: sender,
       data
     });
+  }
+
+  /**
+   * Handle ASTROSENTRY_EVENT from AstroSentries (HTTP→Cognitive bridge)
+   * These come from HTTP API operations in Context Guardian, QuarterMaster, SnapSHOT, TooLee
+   */
+  private handleAstrosentryEvent(signal: Signal, rinfo: RemoteInfo): void {
+    const db = getDatabase();
+    const { sender, serverId, eventType, outcome, operation, metadata, source } = signal.payload as {
+      sender: string;
+      serverId: string;
+      eventType: string;
+      outcome: string;
+      operation: string;
+      metadata: Record<string, unknown>;
+      source: string;
+    };
+
+    // Log as attention event with rich context
+    // Map AstroSentry eventTypes to our EventType taxonomy
+    const event: AttentionEvent = {
+      timestamp: signal.timestamp * 1000 || Date.now(),
+      server_name: serverId || sender,
+      event_type: 'operation',  // AstroSentry events are operational outcomes
+      target: `${eventType}:${operation}`,  // Combine eventType and operation
+      context: {
+        astrosentry_event_type: eventType,
+        outcome,
+        source,  // 'http' indicates HTTP API path
+        metadata
+      }
+    };
+    db.insertAttentionEvent(event);
+
+    // Track as operation for pattern analysis
+    if (outcome) {
+      const op: Operation = {
+        timestamp: signal.timestamp * 1000 || Date.now(),
+        server_name: serverId || sender,
+        operation_type: eventType as OperationType,
+        operation_id: `${serverId}-${eventType}-${Date.now()}`,
+        input_summary: operation,
+        outcome: outcome === 'success' ? 'success' : outcome === 'failure' ? 'failure' : 'partial',
+        quality_score: outcome === 'success' ? 1.0 : outcome === 'failure' ? 0.0 : 0.5,
+        lessons: metadata as Record<string, unknown>
+      };
+      try {
+        db.insertOperation(op);
+      } catch {
+        // Operation might conflict with existing
+      }
+    }
+
+    console.error(`[Handlers] ASTROSENTRY_EVENT: ${serverId}/${eventType} → ${outcome} (source: ${source})`);
+
+    this.context.emit('astrosentry_event', {
+      serverId,
+      eventType,
+      outcome,
+      operation,
+      metadata,
+      source
+    });
+
+    // Track failures for pattern detection
+    if (outcome === 'failure') {
+      this.context.emit('pattern_candidate', {
+        type: 'astrosentry_failure',
+        server: serverId,
+        eventType,
+        operation,
+        metadata
+      });
+    }
   }
 
   /**

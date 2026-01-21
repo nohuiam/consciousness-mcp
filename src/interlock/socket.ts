@@ -1,6 +1,6 @@
 import dgram from 'dgram';
 import { EventEmitter } from 'events';
-import { BaNanoProtocol, SignalTypes } from './protocol.js';
+import { BaNanoProtocol, SignalTypes, decode, encode } from './protocol.js';
 import { Tumbler } from './tumbler.js';
 import { SignalHandlers } from './handlers.js';
 import type { Signal, Peer, InterlockConfig } from '../types.js';
@@ -100,7 +100,8 @@ export class InterlockSocket extends EventEmitter {
    * Handle incoming messages
    */
   private handleMessage(msg: Buffer, rinfo: dgram.RemoteInfo): void {
-    const signal = BaNanoProtocol.decode(msg);
+    // Use standalone decode() which returns null for invalid signals (doesn't throw)
+    const signal = decode(msg);
 
     // Silently ignore invalid/incompatible signals from other servers
     if (!signal) {

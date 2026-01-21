@@ -11,7 +11,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 import { initDatabase, getDatabase } from './database/schema.js';
-import { startHttpServer } from './http/server.js';
+import { startHttpServer, getHttpServer } from './http/server.js';
 import { initWebSocketService, getWebSocketService } from './websocket/server.js';
 import { initInterLock, getInterLock } from './interlock/index.js';
 import { ALL_TOOLS, TOOL_HANDLERS } from './tools/index.js';
@@ -303,22 +303,54 @@ async function main(): Promise<void> {
 }
 
 // Handle graceful shutdown
-process.on('SIGINT', () => {
-  console.error(`\n[${SERVER_NAME}] Shutting down...`);
+async function gracefulShutdown(signal: string): Promise<void> {
+  console.error(`\n[${SERVER_NAME}] Received ${signal}, shutting down gracefully...`);
+
+  const wsService = getWebSocketService();
+  const httpServer = getHttpServer();
   const interlock = getInterLock();
+
+  // 1. Close WebSocket connections first
+  if (wsService) {
+    console.error(`[${SERVER_NAME}] Closing WebSocket connections...`);
+    await wsService.stop();
+  }
+
+  // 2. Close HTTP server (wait up to 5s for connections to drain)
+  if (httpServer) {
+    console.error(`[${SERVER_NAME}] Closing HTTP server...`);
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        console.error(`[${SERVER_NAME}] HTTP server shutdown timeout, forcing close`);
+        resolve();
+      }, 5000);
+
+      httpServer.stop().then(() => {
+        clearTimeout(timeout);
+        resolve();
+      }).catch(() => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  }
+
+  // 3. Stop InterLock mesh
   if (interlock) {
+    console.error(`[${SERVER_NAME}] Stopping InterLock mesh...`);
     interlock.stop();
   }
+
+  console.error(`[${SERVER_NAME}] Shutdown complete.`);
   process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
-  console.error(`[${SERVER_NAME}] Received SIGTERM, shutting down...`);
-  const interlock = getInterLock();
-  if (interlock) {
-    interlock.stop();
-  }
-  process.exit(0);
+  gracefulShutdown('SIGTERM');
 });
 
 // Run
